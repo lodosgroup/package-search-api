@@ -1,0 +1,29 @@
+package search api for lpm repositories
+=======================================
+
+**API Configuration**
+
+DB_PATH(required):
+- export DB_PATH={repository_db_path_to_be_searched}
+
+API_PORT (optional, default is 8126):
+- export API_PORT={CUSTOM_PORT}
+
+**Builds**
+
+Development session
+- go run package-search-api.go
+
+Prod-level binary:
+- go build -ldflags "-s -w" package-search-api.go
+
+**Endpoints**
+
+Search for latest packages:
+- http://127.0.0.1:8126
+
+Search with pattern matching:
+- http://127.0.0.1:8126/?package=lz
+
+Healthcheck:
+- http://127.0.0.1:8126/health
