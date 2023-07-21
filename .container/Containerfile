@@ -1,0 +1,16 @@
+# Compilation
+FROM docker.io/library/golang:1.20.6-alpine as build
+WORKDIR /app
+
+COPY . .
+
+RUN go build -ldflags "-s -w" package-search-api.go
+
+# Runtime
+FROM docker.io/library/debian:bullseye-slim
+
+## Get binary
+COPY --from=build /app/package-search-api /usr/local/bin/package-search-api
+
+## Start the app
+CMD ["package-search-api"]
