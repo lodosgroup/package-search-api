@@ -73,10 +73,12 @@ func validateSearchValue(pkg_search string) error {
 		return errors.New("package' length can not be greater than 50.")
 	}
 
-	pkgNameRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	if len(pkg_search) > 0 {
+		pkgNameRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-	if !pkgNameRegex.MatchString(pkg_search) {
-		return errors.New("Package name can only contain English alphabets, numbers, '-' and '_' characters.")
+		if !pkgNameRegex.MatchString(pkg_search) {
+			return errors.New("Package name can only contain English alphabets, numbers, '-' and '_' characters.")
+		}
 	}
 
 	return nil
@@ -192,7 +194,7 @@ func main() {
 	// Apply the gzip middleware to the entire mux
 	handler := gzipMiddleware(mux)
 
-	fmt.Printf("repository-index-proxy server is listening on port %s for %s\n", apiPort, DB_PATH)
+	fmt.Printf("package-search-api is listening on port %s for %s\n", apiPort, DB_PATH)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", apiPort), handler))
 
 }

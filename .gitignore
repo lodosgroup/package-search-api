@@ -21,4 +21,4 @@
 go.work
 
 # binary
-repository_index_proxy
+package_search_api

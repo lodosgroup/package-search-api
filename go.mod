@@ -1,4 +1,4 @@
-module repository_index_proxy
+module package_search_api
 
 go 1.20
 
