@@ -1,39 +1,198 @@
 package main
 
 import (
+	"compress/gzip"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/gorilla/mux"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var DB_PATH string
+var DB *sql.DB
+
+func queryIndexes(db *sql.DB, query string) ([]byte, error) {
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Get column names and types from the result set.
+	columnNames, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]interface{}
+
+	// Loop through the result set.
+	for rows.Next() {
+		values := make([]interface{}, len(columnNames))
+
+		valuePointers := make([]interface{}, len(columnNames))
+		for i := range values {
+			valuePointers[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePointers...); err != nil {
+			return nil, err
+		}
+
+		rowData := make(map[string]interface{})
+
+		for i, columnName := range columnNames {
+			rowData[columnName] = values[i]
+		}
+
+		results = append(results, rowData)
+	}
+
+	// Convert the results slice to a JSON array.
+	jsonData, err := json.Marshal(results)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonData, nil
+}
+
+func validateSearchValue(pkg_search string) error {
+	if len(pkg_search) > 50 {
+		return errors.New("package' length can not be greater than 50.")
+	}
+
+	pkgNameRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+	if !pkgNameRegex.MatchString(pkg_search) {
+		return errors.New("Package name can only contain English alphabets, numbers, '-' and '_' characters.")
+	}
+
+	return nil
+}
+
+func queryEndpoint(w http.ResponseWriter, r *http.Request) {
+	responseCh := make(chan []byte)
+
+	go func() {
+		w.Header().Set("Content-Type", "application/json")
+
+		pkg_search := r.URL.Query().Get("package")
+
+		err := validateSearchValue(pkg_search)
+		if err != nil {
+			r := make(map[string]interface{})
+			r["error"] = err.Error()
+			err, _ := json.Marshal(r)
+			w.WriteHeader(http.StatusBadRequest)
+			responseCh <- err
+			return
+		}
+
+		query := fmt.Sprintf("SELECT * from repository WHERE name LIKE '%%%s%%' ORDER BY index_timestamp DESC LIMIT 150;", pkg_search)
+
+		jsonData, err := queryIndexes(DB, query)
+		if err != nil {
+			r := make(map[string]interface{})
+			r["error"] = err.Error()
+			err, _ := json.Marshal(r)
+
+			w.WriteHeader(http.StatusBadRequest)
+			responseCh <- err
+			return
+		}
+
+		contentLength := strconv.Itoa(len(jsonData))
+		w.Header().Set("Content-Length", contentLength)
+		w.WriteHeader(http.StatusOK)
+
+		responseCh <- jsonData
+	}()
+
+	select {
+	case response := <-responseCh:
+		w.Write(response)
+	case <-time.After(5 * time.Second): // timeout handling
+		w.WriteHeader(http.StatusRequestTimeout)
+		w.Write([]byte("Timeout exceeded"))
+	}
+
+}
+
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (grw gzipResponseWriter) Write(b []byte) (int, error) {
+	return grw.Writer.Write(b)
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// only compress if client supports gzip encoding
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gzipWriter := gzip.NewWriter(w)
+			defer gzipWriter.Close()
+
+			// replace the response writer
+			w = gzipResponseWriter{Writer: gzipWriter, ResponseWriter: w}
+		}
+
+		// move to next handler
+		next.ServeHTTP(w, r)
+	})
+}
+
+func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("API is healthy"))
+}
 
 func main() {
 	DB_PATH = os.Getenv("DB_PATH")
+	apiPort := os.Getenv("API_PORT")
 
 	if DB_PATH == "" {
 		log.Fatal("DB_PATH environment is not present.")
 	}
 
+	if apiPort == "" {
+		apiPort = "8126"
+	}
+
 	connection := fmt.Sprintf("file:%s?mode=ro&cache=shared", DB_PATH)
 
-	db, err := sql.Open("sqlite3", connection)
+	var err error
+	DB, err = sql.Open("sqlite3", connection)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	defer db.Close()
+	defer DB.Close()
 
-	var version string
-	err = db.QueryRow("SELECT SQLITE_VERSION()").Scan(&version)
+	mux := mux.NewRouter().StrictSlash(true)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	mux.HandleFunc("/", queryEndpoint)
+	mux.HandleFunc("/health", healthCheckHandler)
 
-	fmt.Println(version)
+	// Apply the gzip middleware to the entire mux
+	handler := gzipMiddleware(mux)
+
+	fmt.Printf("repository-index-proxy server is listening on port %s for %s\n", apiPort, DB_PATH)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", apiPort), handler))
+
 }
