@@ -141,11 +141,14 @@ func (grw gzipResponseWriter) Write(b []byte) (int, error) {
 	return grw.Writer.Write(b)
 }
 
-func gzipMiddleware(next http.Handler) http.Handler {
+func middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// only compress if client supports gzip encoding
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
+
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+
 			gzipWriter := gzip.NewWriter(w)
 			defer gzipWriter.Close()
 
@@ -192,7 +195,7 @@ func main() {
 	mux.HandleFunc("/health", healthCheckHandler)
 
 	// Apply the gzip middleware to the entire mux
-	handler := gzipMiddleware(mux)
+	handler := middleware(mux)
 
 	fmt.Printf("package-search-api is listening on port %s for %s\n", apiPort, DB_PATH)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", apiPort), handler))
