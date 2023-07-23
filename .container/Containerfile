@@ -1,10 +1,10 @@
 # Compilation
-FROM docker.io/library/golang:1.20.6-alpine as build
+FROM docker.io/library/golang:1.20.6-bullseye as build
 WORKDIR /app
 
 COPY . .
 
-RUN go build -ldflags "-s -w" package-search-api.go
+RUN go build -a -ldflags "-linkmode external -extldflags '-static' -s -w" package-search-api.go
 
 # Runtime
 FROM docker.io/library/debian:bullseye-slim

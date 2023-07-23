@@ -15,7 +15,7 @@ Development session
 - go run package-search-api.go
 
 Prod-level binary:
-- go build -ldflags "-s -w" package-search-api.go
+- go build -a -ldflags "-linkmode external -extldflags '-static' -s -w" package-search-api.go
 
 **Endpoints**
 
