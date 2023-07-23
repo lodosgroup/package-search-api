@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"database/sql"
 	"encoding/json"
@@ -22,6 +23,40 @@ import (
 var DB_PATH string
 var DB *sql.DB
 
+// OrderedMap represents a map with ordered keys.
+type OrderedMap struct {
+	keys []string
+	data map[string]interface{}
+}
+
+func newOrderedMap() *OrderedMap {
+	return &OrderedMap{
+		data: make(map[string]interface{}),
+	}
+}
+
+func (om *OrderedMap) set(key string, value interface{}) {
+	om.keys = append(om.keys, key)
+	om.data[key] = value
+}
+
+func (om *OrderedMap) MarshalJSON() ([]byte, error) {
+	buf := bytes.NewBufferString("{")
+	for i, key := range om.keys {
+		if i != 0 {
+			buf.WriteString(",")
+		}
+		value := om.data[key]
+		jsonValue, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteString(fmt.Sprintf(`"%s":%s`, key, jsonValue))
+	}
+	buf.WriteString("}")
+	return buf.Bytes(), nil
+}
+
 func queryIndexes(db *sql.DB, query string) ([]byte, error) {
 	rows, err := db.Query(query)
 	if err != nil {
@@ -35,7 +70,7 @@ func queryIndexes(db *sql.DB, query string) ([]byte, error) {
 		return nil, err
 	}
 
-	var results []map[string]interface{}
+	var results []*OrderedMap
 
 	// Loop through the result set.
 	for rows.Next() {
@@ -50,13 +85,14 @@ func queryIndexes(db *sql.DB, query string) ([]byte, error) {
 			return nil, err
 		}
 
-		rowData := make(map[string]interface{})
+		rowData := newOrderedMap()
 
 		for i, columnName := range columnNames {
-			rowData[columnName] = values[i]
+			rowData.set(columnName, values[i])
 		}
 
 		results = append(results, rowData)
+
 	}
 
 	// Convert the results slice to a JSON array.
@@ -102,7 +138,13 @@ func queryEndpoint(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		query := fmt.Sprintf("SELECT * from repository WHERE name LIKE '%%%s%%' ORDER BY index_timestamp DESC LIMIT 150;", pkg_search)
+		query := fmt.Sprintf(`
+               SELECT
+               name, v_readable as version, description, arch, kind, tags, installed_size as "installed size", maintainer, license, source_repository as "repository", mandatory_dependencies as "dependencies"
+               FROM repository
+               WHERE name LIKE '%%%s%%'
+               ORDER BY index_timestamp DESC
+               LIMIT 150;`, pkg_search)
 
 		jsonData, err := queryIndexes(DB, query)
 		if err != nil {
