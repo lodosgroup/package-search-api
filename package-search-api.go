@@ -138,6 +138,7 @@ func queryEndpoint(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// SAFETY: pkg_search param is validated through a regex pattern in validateSearchValue function. 
 		query := fmt.Sprintf(`
                SELECT
                name, v_readable as version, description, arch, kind, tags, installed_size as "installed size", maintainer, license, source_repository as "repository", mandatory_dependencies as "dependencies"
